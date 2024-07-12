@@ -50,6 +50,8 @@ local function mark_node(node, show_selection)
   end
 end
 
+---@param row integer
+---@param col integer
 local function goto_pos(row, col)
   vim.fn.setpos(".", { 0, row + 1, col + 1, 0 })
 end
@@ -72,6 +74,20 @@ local function replace_node(node, new_text)
   local from_row, from_col = node:start()
   local to_row, to_col = node:end_()
   vim.api.nvim_buf_set_text(0, from_row, from_col, to_row, to_col, new_text)
+end
+
+---@param row integer
+---@param col integer
+---@param text string[]
+local function insert_text_at_pos(row, col, text)
+  vim.api.nvim_buf_set_text(0, row, col, row, col, text)
+end
+
+---@param text string[]
+local function insert_text_at_cursor(text)
+  local cursor_pos = vim.api.nvim_win_get_cursor(0)
+  local row, col = cursor_pos[1], cursor_pos[2]
+  vim.api.nvim_buf_set_text(0, row, col, row, col, text)
 end
 
 ---@param node TSNode
@@ -180,13 +196,20 @@ local function node_to_string(node)
   return vim.api.nvim_buf_get_text(0, from_row, from_col, to_row, to_col, {})
 end
 
+---@param str string|nil
+local function is_whitespace_or_empty(str)
+  if str == nil then return true end
+  return str:match("^%s*$") ~= nil
+end
+
 M.__last_op = nil
 M.__no_op = function() end
 -- Make function f work with dot-repeat by wrapping it in operatorfunc magic
----@param f function
+---@param f fun(is_dot_repeat: boolean|nil)
 local function dot_repeatable(f)
+  local is_dot_repeat = false
   M.__last_op = function()
-    f()
+    f(is_dot_repeat)
     -- save visual state in case we need to restore it after the NOOP hack
     local restore_visual_mode = string.lower(vim.fn.mode()) == "v"
 
@@ -204,6 +227,8 @@ local function dot_repeatable(f)
     if restore_visual_mode then
       normal("gv")
     end
+
+    is_dot_repeat = true
   end
   vim.go.operatorfunc = "v:lua.require'hearthmill'.__last_op"
   normal("g@l")
@@ -382,6 +407,91 @@ function M.rename()
           if last_touched_node then
             goto_node_start(last_touched_node)
           end
+        end
+      end)
+    end
+  )
+end
+
+function M.wrap()
+  local mode = vim.fn.mode()
+
+  vim.ui.input(
+    { prompt = "Wrap with Element: " },
+    ---@param new_tag_name string|nil
+    function(new_tag_name)
+      if new_tag_name == nil then
+        -- user cancelled input
+        return
+      end
+      dot_repeatable(function(is_dot_repeat)
+        local insert_new_lines = false
+        ---@type number|nil
+        local start_row = nil
+        ---@type number|nil
+        local start_col = nil
+        ---@pyte number|nil
+        local end_row = nil
+        ---@pyte number|nil
+        local end_col = nil
+
+        -- if is_dot_repeat then
+        --   mode = vim.fn.mode()
+        --   vim.notify(mode)
+        --   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', false, true, true), 'nx', false)
+        -- end
+
+        if mode == "v" then
+          _, start_row, start_col = unpack(vim.fn.getpos("'<"))
+          _, end_row, end_col = unpack(vim.fn.getpos("'>"))
+          start_row = start_row - 1
+          start_col = start_col - 1
+          end_row = end_row - 1
+          end_col = end_col
+          -- vim.notify(string.format("%s %s %s %s", start_row, start_col, end_row, end_col))
+          insert_new_lines = false
+        elseif mode == "V" then
+          _, start_row, start_col = vim.fn.getpos(".")
+          _, end_row, end_col = vim.fn.getpos("v")
+          insert_new_lines = true
+        else
+          local element = node_at_cursor("element")
+          if element then
+            start_row, start_col = element:start()
+            end_row, end_col = element:end_()
+
+            -- check if element doesn't share lines with any other content.
+            -- if it does, wrap without using new lines.
+            ---@type string
+            local start_line = vim.api.nvim_buf_get_lines(0, start_row, start_row+1, false)[1]
+            ---@type string
+            local end_line = vim.api.nvim_buf_get_lines(0, end_row, end_row+1, false)[1]
+            local text_before_element = start_line:sub(0, start_col)
+            local text_after_element = end_line:sub(end_col+1)
+            insert_new_lines = is_whitespace_or_empty(text_before_element) and is_whitespace_or_empty(text_after_element)
+          end
+        end
+
+        if start_row == nil or start_col == nil or end_row == nil or end_col == nil then
+          return
+        end
+
+        local new_start_tag_text = string.format("<%s>", new_tag_name)
+        local new_end_tag_text = string.format("</%s>", new_tag_name)
+
+        if insert_new_lines then
+          insert_text_at_pos(end_row, end_col, { "", new_end_tag_text })
+          insert_text_at_pos(start_row, start_col, { new_start_tag_text, "" })
+          goto_pos(start_row, start_col)
+          treesitter_reparse()
+          local new_element = node_at_cursor("element")
+          if new_element then
+            mark_node(new_element)
+            normal("=")
+          end
+        else
+          insert_text_at_pos(end_row, end_col, { new_end_tag_text })
+          insert_text_at_pos(start_row, start_col, { new_start_tag_text })
         end
       end)
     end
