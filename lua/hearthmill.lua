@@ -9,6 +9,11 @@ function M.setup(opts)
   M.type_aliases_map = opts.type_aliases_map or M.type_aliases_map
 end
 
+---@param keystrokes string
+local function normal(keystrokes)
+  vim.cmd("normal! " .. keystrokes)
+end
+
 ---@param node TSNode
 local function node_is_type(node, target_type)
   local matching_types = M.type_aliases_map[target_type] or { target_type }
@@ -29,9 +34,9 @@ local function mark_node(node, show_selection)
   vim.fn.setpos("'<", { 0, r1 + 1, c1 + 1, 0 })
   vim.fn.setpos("'>", { 0, r2 + 1, c2, 0 })
   if show_selection == "linewise" then
-    vim.cmd("normal! '<V'>")
+    normal("'<V'>")
   elseif show_selection == nil or show_selection == true then
-    vim.cmd("normal! `<v`>")
+    normal("`<v`>")
   end
 end
 
@@ -40,9 +45,43 @@ local function goto_pos(row, col)
 end
 
 ---@param node TSNode
+local function goto_node_start(node)
+  local row, col = node:start()
+  goto_pos(row, col)
+end
+---
+---@param node TSNode
+local function goto_node_end(node)
+  local row, col = node:end_()
+  goto_pos(row, col - 1)
+end
+
+---@param node TSNode
 local function delete_node(node)
   mark_node(node)
-  vim.cmd("normal! d")
+  normal("d")
+end
+
+local function treesitter_reparse()
+  vim.treesitter.get_parser():parse()
+end
+
+local function delete_blanks()
+  -- collapse a single spaces before or after the cursor
+  local cursor_col = vim.api.nvim_win_get_cursor(0)[2]
+  local cursor_char = vim.api.nvim_get_current_line():sub(cursor_col+1, cursor_col+1)
+  if cursor_char == " " then
+    normal("x")
+  else
+    cursor_char = vim.api.nvim_get_current_line():sub(cursor_col, cursor_col)
+    if cursor_char == " " then
+      normal("X")
+    end
+  end
+  -- delete the line if it's blank
+  vim.cmd([[silent! s/^\s*$\n//]])
+  -- hide search highlights
+  vim.cmd(":noh")
 end
 
 ---@param type string
@@ -100,92 +139,138 @@ local function prev_node(node, type)
   return n
 end
 
+M.__last_op = nil
+M.__no_op = function() end
 -- Make function f work with dot-repeat by wrapping it in operatorfunc magic
-M.HEARTHMILL_LAST_OP = nil
-M.HEARTHMILL_NO_OP = function() end
+---@param f function
 local function dot_repeatable(f)
-  M.HEARTHMILL_LAST_OP = function()
+  M.__last_op = function()
     f()
 
-    -- This little dance is required so that dot-repeat won't pick up any
-    -- text operations in the last hearthmill op and try to incorrectly
-    -- dot-repeat that instead. We get around that by ensuring g@l is the
-    -- last thing neovim executes, but we also don't want to do the actual
-    -- hearthmill op twice (!), so we first set operatorfunc to a NOOP
-    -- function before we call g@l as a "last word" to neovim, then set
-    -- operatorfunc back to the last hearthmill op for the next dot-repeat
-    vim.go.operatorfunc = "v:lua.require'hearthmill'.HEARTHMILL_NO_OP"
-    vim.cmd("normal! g@l")
-    vim.go.operatorfunc = "v:lua.require'hearthmill'.HEARTHMILL_LAST_OP"
+    -- save visual state in case we need to restore it after the NOOP hack
+    local restore_visual_mode = string.lower(vim.fn.mode()) == "v"
+
+    -- This little dance is required so that dot-repeat won't pick up any text
+    -- operations in the last text edit and try to incorrectly dot-repeat that
+    -- instead. We get around that by ensuring g@l is the last thing neovim
+    -- executes, but we also don't want to do the actual hearthmill op twice
+    -- (!), so we first set operatorfunc to a NOOP function before we call g@l
+    -- as a "last word" to neovim, then set operatorfunc back to the last
+    -- hearthmill op for the next dot-repeat.
+    vim.go.operatorfunc = "v:lua.require'hearthmill'.__no_op"
+    normal("g@l")
+    vim.go.operatorfunc = "v:lua.require'hearthmill'.__last_op"
+
+    if restore_visual_mode then
+      normal("gv")
+    end
   end
-  vim.go.operatorfunc = "v:lua.require'hearthmill'.HEARTHMILL_LAST_OP"
-  vim.cmd("normal! g@l")
+  vim.go.operatorfunc = "v:lua.require'hearthmill'.__last_op"
+  normal("g@l")
 end
 
 ---@param type string
 function M.select(type)
-  local node = node_at_cursor(type)
-  if node then
-    mark_node(node)
-  end
+  dot_repeatable(function()
+    local node = node_at_cursor(type)
+    if node then
+      mark_node(node)
+    end
+  end)
 end
 
 ---@param type string
 function M.delete(type)
-  return dot_repeatable(function()
+  dot_repeatable(function()
     local node = node_at_cursor(type)
     if node then
       delete_node(node)
+      delete_blanks()
+    end
+  end)
+end
+
+---@param type string
+function M.transpose(type)
+  dot_repeatable(function()
+    local node = node_at_cursor(type)
+    if not node then
+      return
+    end
+    local next = next_node(node, type)
+    if node and next then
+      mark_node(node)
+      normal("y")
+      mark_node(next)
+      normal("p")
+      mark_node(node)
+      normal("p")
+
+      -- set the cursor position at a sane position, best effort
+      treesitter_reparse()
+      node = node_at_cursor(type)
+      if not node then
+        return
+      end
+      next = next_node(node, type)
+      if not next then
+        return
+      end
+      goto_node_start(next)
     end
   end)
 end
 
 ---@param type string
 function M.goto_beginning(type)
-  local node = node_at_cursor(type)
-  if node then
-    local row, col = node:start()
-    goto_pos(row, col)
-  end
+  dot_repeatable(function()
+    local node = node_at_cursor(type)
+    if node then
+      goto_node_start(node)
+    end
+  end)
 end
 
 ---@param type string
 function M.goto_end(type)
-  local node = node_at_cursor(type)
-  if node then
-    local row, col = node:end_()
-    goto_pos(row, col - 1)
-  end
+  dot_repeatable(function()
+    local node = node_at_cursor(type)
+    if node then
+      goto_node_end(node)
+    end
+  end)
 end
 
 ---@param type string
 function M.goto_next(type)
-  local node = node_at_cursor(type)
-  if not node then
-    return nil
-  end
-  local next = next_node(node, type)
-  if next then
-    local row, col = next:start()
-    goto_pos(row, col)
-  end
+  dot_repeatable(function()
+    local node = node_at_cursor(type)
+    if not node then
+      return nil
+    end
+    local next = next_node(node, type)
+    if next then
+      goto_node_start(next)
+    end
+  end)
 end
 
 ---@param type string
 function M.goto_prev(type)
-  local node = node_at_cursor(type)
-  if not node then
-    return nil
-  end
-  local prev = prev_node(node, type)
-  if prev then
-    local row, col = prev:start()
-    goto_pos(row, col)
-  end
+  dot_repeatable(function()
+    local node = node_at_cursor(type)
+    if not node then
+      return nil
+    end
+    local prev = prev_node(node, type)
+    if prev then
+      goto_node_start(prev)
+    end
+  end)
 end
 
 function M.vanish()
-  return dot_repeatable(function()
+  dot_repeatable(function()
     local element = node_at_cursor("element")
     if element then
       local start_tag = first_child_of_type(element, "start_tag")
