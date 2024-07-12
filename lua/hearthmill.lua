@@ -67,9 +67,16 @@ local function goto_node_end(node)
 end
 
 ---@param node TSNode
+---@param new_text string[]
+local function replace_node(node, new_text)
+  local from_row, from_col = node:start()
+  local to_row, to_col = node:end_()
+  vim.api.nvim_buf_set_text(0, from_row, from_col, to_row, to_col, new_text)
+end
+
+---@param node TSNode
 local function delete_node(node)
-  mark_node(node)
-  normal("d")
+  replace_node(node, { "" })
 end
 
 local function treesitter_reparse()
@@ -166,11 +173,11 @@ local function prev_node(node, type)
 end
 
 ---@param node TSNode
----@return string
+---@return string[]
 local function node_to_string(node)
   local from_row, from_col = node:start()
   local to_row, to_col = node:end_()
-  return table.concat(vim.api.nvim_buf_get_text(0, from_row, from_col, to_row, to_col, {}))
+  return vim.api.nvim_buf_get_text(0, from_row, from_col, to_row, to_col, {})
 end
 
 M.__last_op = nil
@@ -218,8 +225,8 @@ function M.delete(type)
     local node = node_at_cursor(type)
     if node then
       delete_node(node)
-      collapse_blank_lines()
       collapse_blank_spaces()
+      collapse_blank_lines()
     end
   end)
 end
@@ -233,12 +240,10 @@ function M.transpose(type)
     end
     local next = next_node(node, type)
     if node and next then
-      mark_node(node)
-      normal("y")
-      mark_node(next)
-      normal("p")
-      mark_node(node)
-      normal("p")
+      local node_text = node_to_string(node)
+      local next_text = node_to_string(next)
+      replace_node(next, node_text)
+      replace_node(node, next_text)
 
       -- set the cursor position at a sane position, best effort
       treesitter_reparse()
@@ -336,40 +341,45 @@ function M.rename()
     return
   end
 
-  vim.ui.input({
-    prompt = "Rename Element To: ",
-    default = node_to_string(initial_tag_name),
-  }, function(new_tag_name)
-    if new_tag_name == nil then
-      return
-    end
+  vim.ui.input(
+    {
+      prompt = "Rename Element To: ",
+      default = node_to_string(initial_tag_name)[1],
+    },
+    ---@param new_tag_name string|nil
+    function(new_tag_name)
+      if new_tag_name == nil then
+        -- user cancelled input
+        return
+      end
 
-    dot_repeatable(function()
-      local element = node_at_cursor("element")
-      if element then
-        ---@type TSNode|nil
-        local last_touched_node = nil
+      dot_repeatable(function()
+        local element = node_at_cursor("element")
+        if element then
+          ---@type TSNode|nil
+          local last_touched_node = nil
 
-        local tags = children_of_type(element, "tag")
-        if node_is_type(element, "tag") then
-          tags[#tags + 1] = element
-        end
-        for i = #tags, 1, -1 do
-          local tag_name_node = first_child_of_type(tags[i], "tag_name")
-          if tag_name_node then
-            mark_node(tag_name_node)
-            vim.fn.setreg('"', new_tag_name)
-            normal('""p')
-            last_touched_node = tag_name_node
+          local tags = children_of_type(element, "tag")
+          if node_is_type(element, "tag") then
+            tags[#tags + 1] = element
+          end
+          -- reverse order is important:
+          -- allows editing without worrying about positions changing.
+          for i = #tags, 1, -1 do
+            local tag_name_node = first_child_of_type(tags[i], "tag_name")
+            if tag_name_node then
+              replace_node(tag_name_node, { new_tag_name })
+              last_touched_node = tag_name_node
+            end
+          end
+
+          if last_touched_node then
+            goto_node_start(last_touched_node)
           end
         end
-
-        if last_touched_node then
-          goto_node_start(last_touched_node)
-        end
-      end
-    end)
-  end)
+      end)
+    end
+  )
 end
 
 return M
