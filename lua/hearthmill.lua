@@ -84,7 +84,7 @@ local function treesitter_reparse()
 end
 
 local function collapse_blank_spaces()
-  -- collapse a single spaces before or after the cursor
+  -- collapse a single space before or after the cursor
   local cursor_col = vim.api.nvim_win_get_cursor(0)[2]
   local cursor_char = vim.api.nvim_get_current_line():sub(cursor_col + 1, cursor_col + 1)
   if cursor_char == " " then
@@ -314,14 +314,20 @@ function M.vanish()
     if element then
       local start_tag = first_child_of_type(element, "start_tag")
       local end_tag = first_child_of_type(element, "end_tag")
+
       if end_tag then
         delete_node(end_tag)
+        goto_node_start(end_tag)
         collapse_blank_lines()
       end
       if start_tag then
         delete_node(start_tag)
+        goto_node_start(start_tag)
         collapse_blank_lines()
       end
+
+      mark_node(element)
+      normal("=")
     end
   end)
 end
