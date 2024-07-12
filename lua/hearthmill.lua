@@ -1,7 +1,17 @@
 local M = {}
 
 M.type_aliases_map = {
-  tag = { "start_tag", "end_tag", "self_closing_tag" },
+  element = { "element", "jsx_element", "jsx_self_closing_element" },
+  tag = {
+    "start_tag",
+    "end_tag",
+    "self_closing_tag",
+    "jsx_opening_element",
+    "jsx_closing_element",
+    "jsx_self_closing_element",
+  },
+  attribute = { "attribute", "jsx_attribute" },
+  tag_name = { "tag_name", "identifier" },
 }
 
 function M.setup(opts)
@@ -29,10 +39,10 @@ end
 ---@param node TSNode
 ---@param show_selection (nil|true|false|"linewise")
 local function mark_node(node, show_selection)
-  local r1, c1 = node:start()
-  local r2, c2 = node:end_()
-  vim.fn.setpos("'<", { 0, r1 + 1, c1 + 1, 0 })
-  vim.fn.setpos("'>", { 0, r2 + 1, c2, 0 })
+  local from_row, from_col = node:start()
+  local to_row, to_col = node:end_()
+  vim.fn.setpos("'<", { 0, from_row + 1, from_col + 1, 0 })
+  vim.fn.setpos("'>", { 0, to_row + 1, to_col, 0 })
   if show_selection == "linewise" then
     normal("'<V'>")
   elseif show_selection == nil or show_selection == true then
@@ -137,30 +147,30 @@ end
 ---@param type string
 ---@return (TSNode|nil)
 local function next_node(node, type)
-  local n = node:next_sibling()
-  while n and type and not node_is_type(n, type) do
-    n = n:next_sibling()
+  local next = node:next_sibling()
+  while next and type and not node_is_type(next, type) do
+    next = next:next_sibling()
   end
-  return n
+  return next
 end
 
 ---@param node TSNode
 ---@param type string
 ---@return (TSNode|nil)
 local function prev_node(node, type)
-  local n = node:prev_sibling()
-  while n and type and not node_is_type(n, type) do
-    n = n:prev_sibling()
+  local prev = node:prev_sibling()
+  while prev and type and not node_is_type(prev, type) do
+    prev = prev:prev_sibling()
   end
-  return n
+  return prev
 end
 
 ---@param node TSNode
 ---@return string
 local function node_to_string(node)
-  local r1, c1 = node:start()
-  local r2, c2 = node:end_()
-  return table.concat(vim.api.nvim_buf_get_text(0, r1, c1, r2, c2, {}))
+  local from_row, from_col = node:start()
+  local to_row, to_col = node:end_()
+  return table.concat(vim.api.nvim_buf_get_text(0, from_row, from_col, to_row, to_col, {}))
 end
 
 M.__last_op = nil
@@ -312,22 +322,23 @@ function M.vanish()
 end
 
 function M.rename()
-  local starting_element = node_at_cursor("element")
-  if not starting_element then
+  local initial_element = node_at_cursor("element")
+  if not initial_element then
     return
   end
-  local starting_tag = first_child_of_type(starting_element, "tag")
-  if not starting_tag then
+  local initial_tag = node_is_type(initial_element, "tag") and initial_element
+    or first_child_of_type(initial_element, "tag")
+  if not initial_tag then
     return
   end
-  local starting_tag_name = first_child_of_type(starting_tag, "tag_name")
-  if not starting_tag_name then
+  local initial_tag_name = first_child_of_type(initial_tag, "tag_name")
+  if not initial_tag_name then
     return
   end
 
   vim.ui.input({
     prompt = "Rename Element To: ",
-    default = node_to_string(starting_tag_name),
+    default = node_to_string(initial_tag_name),
   }, function(new_tag_name)
     if new_tag_name == nil then
       return
@@ -340,6 +351,9 @@ function M.rename()
         local last_touched_node = nil
 
         local tags = children_of_type(element, "tag")
+        if node_is_type(element, "tag") then
+          tags[#tags + 1] = element
+        end
         for i = #tags, 1, -1 do
           local tag_name_node = first_child_of_type(tags[i], "tag_name")
           if tag_name_node then
