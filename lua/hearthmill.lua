@@ -69,7 +69,7 @@ end
 local function delete_blanks()
   -- collapse a single spaces before or after the cursor
   local cursor_col = vim.api.nvim_win_get_cursor(0)[2]
-  local cursor_char = vim.api.nvim_get_current_line():sub(cursor_col+1, cursor_col+1)
+  local cursor_char = vim.api.nvim_get_current_line():sub(cursor_col + 1, cursor_col + 1)
   if cursor_char == " " then
     normal("x")
   else
@@ -102,12 +102,25 @@ local function node_at_pos(type, row, col)
 end
 
 ---@param node TSNode
+---@return (TSNode|nil)
 local function first_child_of_type(node, type)
   for child in node:iter_children() do
     if node_is_type(child, type) then
       return child
     end
   end
+end
+
+---@param node TSNode
+---@return TSNode[]
+local function children_of_type(node, type)
+  local results = {}
+  for child in node:iter_children() do
+    if node_is_type(child, type) then
+      results[#results + 1] = child
+    end
+  end
+  return results
 end
 
 ---@param type string
@@ -139,6 +152,14 @@ local function prev_node(node, type)
   return n
 end
 
+---@param node TSNode
+---@return string
+local function node_to_string(node)
+  local r1, c1 = node:start()
+  local r2, c2 = node:end_()
+  return table.concat(vim.api.nvim_buf_get_text(0, r1, c1, r2, c2, {}))
+end
+
 M.__last_op = nil
 M.__no_op = function() end
 -- Make function f work with dot-repeat by wrapping it in operatorfunc magic
@@ -146,7 +167,6 @@ M.__no_op = function() end
 local function dot_repeatable(f)
   M.__last_op = function()
     f()
-
     -- save visual state in case we need to restore it after the NOOP hack
     local restore_visual_mode = string.lower(vim.fn.mode()) == "v"
 
@@ -282,6 +302,53 @@ function M.vanish()
         delete_node(start_tag)
       end
     end
+  end)
+end
+
+function M.rename()
+  local starting_element = node_at_cursor("element")
+  if not starting_element then
+    return
+  end
+  local starting_tag = first_child_of_type(starting_element, "tag")
+  if not starting_tag then
+    return
+  end
+  local starting_tag_name = first_child_of_type(starting_tag, "tag_name")
+  if not starting_tag_name then
+    return
+  end
+
+  vim.ui.input({
+    prompt = "Rename Element To: ",
+    default = node_to_string(starting_tag_name),
+  }, function(new_tag_name)
+    if new_tag_name == nil then
+      return
+    end
+
+    dot_repeatable(function()
+      local element = node_at_cursor("element")
+      if element then
+        ---@type TSNode|nil
+        local last_touched_node = nil
+
+        local tags = children_of_type(element, "tag")
+        for i = #tags, 1, -1 do
+          local tag_name_node = first_child_of_type(tags[i], "tag_name")
+          if tag_name_node then
+            mark_node(tag_name_node)
+            vim.fn.setreg('"', new_tag_name)
+            normal('""p')
+            last_touched_node = tag_name_node
+          end
+        end
+
+        if last_touched_node then
+          goto_node_start(last_touched_node)
+        end
+      end
+    end)
   end)
 end
 
