@@ -66,7 +66,7 @@ local function treesitter_reparse()
   vim.treesitter.get_parser():parse()
 end
 
-local function delete_blanks()
+local function collapse_blank_spaces()
   -- collapse a single spaces before or after the cursor
   local cursor_col = vim.api.nvim_win_get_cursor(0)[2]
   local cursor_char = vim.api.nvim_get_current_line():sub(cursor_col + 1, cursor_col + 1)
@@ -78,6 +78,9 @@ local function delete_blanks()
       normal("X")
     end
   end
+end
+
+local function collapse_blank_lines()
   -- delete the line if it's blank
   vim.cmd([[silent! s/^\s*$\n//]])
   -- hide search highlights
@@ -205,7 +208,8 @@ function M.delete(type)
     local node = node_at_cursor(type)
     if node then
       delete_node(node)
-      delete_blanks()
+      collapse_blank_lines()
+      collapse_blank_spaces()
     end
   end)
 end
@@ -297,9 +301,11 @@ function M.vanish()
       local end_tag = first_child_of_type(element, "end_tag")
       if end_tag then
         delete_node(end_tag)
+        collapse_blank_lines()
       end
       if start_tag then
         delete_node(start_tag)
+        collapse_blank_lines()
       end
     end
   end)
