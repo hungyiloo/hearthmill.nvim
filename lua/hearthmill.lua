@@ -76,7 +76,7 @@ local function goto_node_start(node)
   local row, col = node:start()
   set_cursor(row, col)
 end
----
+
 ---@param node TSNode
 local function goto_node_end(node)
   local row, col = node:end_()
@@ -151,6 +151,7 @@ local function node_at_pos(type, row, col)
 end
 
 ---@param node TSNode
+---@param type string
 ---@return TSNode|nil
 local function first_child_of_type(node, type)
   for child in node:iter_children() do
@@ -161,6 +162,18 @@ local function first_child_of_type(node, type)
 end
 
 ---@param node TSNode
+---@param type string
+---@return TSNode|nil
+local function first_ancestor_of_type(node, type)
+  local ancestor = node:parent()
+  while ancestor and type and not node_is_type(ancestor, type) do
+    ancestor = ancestor:parent()
+  end
+  return ancestor
+end
+
+---@param node TSNode
+---@param type string
 ---@return TSNode[]
 local function children_of_type(node, type)
   local results = {}
@@ -307,7 +320,6 @@ function M.select_contents(type)
         normal("l")
       end
       normal("o")
-
     elseif type == "attribute" then
       local second_child = node:child(2)
       if not second_child then
@@ -415,6 +427,19 @@ function M.goto_next(type)
     local next = next_node(node, type)
     if next then
       goto_node_start(next)
+    end
+  end)
+end
+
+function M.goto_parent_element()
+  dot_repeatable(function()
+    local node = node_at_cursor("element")
+    if not node then
+      return
+    end
+    local outer = first_ancestor_of_type(node, "element")
+    if outer then
+      goto_node_start(outer)
     end
   end)
 end
