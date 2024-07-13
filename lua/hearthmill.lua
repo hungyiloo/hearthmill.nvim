@@ -36,36 +36,36 @@ local function node_is_type(node, target_type)
   return false
 end
 
----@param node TSNode
----@param show_selection (nil|true|false|"linewise")
-local function mark_node(node, show_selection)
-  local from_row, from_col = node:start()
-  local to_row, to_col = node:end_()
-  vim.fn.setpos("'<", { 0, from_row + 1, from_col + 1, 0 })
-  vim.fn.setpos("'>", { 0, to_row + 1, to_col, 0 })
-  if show_selection == "linewise" then
-    normal("'<V'>")
-  elseif show_selection == nil or show_selection == true then
-    normal("`<v`>")
-  end
+local function get_cursor()
+  local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+  return row - 1, col
 end
 
 ---@param row integer
 ---@param col integer
-local function goto_pos(row, col)
-  vim.fn.setpos(".", { 0, row + 1, col + 1, 0 })
+local function set_cursor(row, col)
+  vim.api.nvim_win_set_cursor(0, { row + 1, col })
+end
+
+---@param node TSNode
+local function mark_node(node)
+  local from_row, from_col = node:start()
+  local to_row, to_col = node:end_()
+  set_cursor(from_row, from_col)
+  normal("v")
+  set_cursor(to_row, to_col - 1)
 end
 
 ---@param node TSNode
 local function goto_node_start(node)
   local row, col = node:start()
-  goto_pos(row, col)
+  set_cursor(row, col)
 end
 ---
 ---@param node TSNode
 local function goto_node_end(node)
   local row, col = node:end_()
-  goto_pos(row, col - 1)
+  set_cursor(row, col - 1)
 end
 
 ---@param node TSNode
@@ -83,13 +83,6 @@ local function insert_text_at_pos(row, col, text)
   vim.api.nvim_buf_set_text(0, row, col, row, col, text)
 end
 
----@param text string[]
-local function insert_text_at_cursor(text)
-  local cursor_pos = vim.api.nvim_win_get_cursor(0)
-  local row, col = cursor_pos[1], cursor_pos[2]
-  vim.api.nvim_buf_set_text(0, row, col, row, col, text)
-end
-
 ---@param node TSNode
 local function delete_node(node)
   replace_node(node, { "" })
@@ -101,7 +94,7 @@ end
 
 local function collapse_blank_spaces()
   -- collapse a single space before or after the cursor
-  local cursor_col = vim.api.nvim_win_get_cursor(0)[2]
+  local _, cursor_col = get_cursor()
   local cursor_char = vim.api.nvim_get_current_line():sub(cursor_col + 1, cursor_col + 1)
   if cursor_char == " " then
     normal("x")
@@ -121,15 +114,15 @@ local function collapse_blank_lines()
 end
 
 ---@param type string
----@param row (nil|integer)
----@param col (nil|integer)
----@return (TSNode|nil)
+---@param row integer
+---@param col integer
+---@return TSNode|nil
 local function node_at_pos(type, row, col)
   local node = vim.treesitter.get_node({
     bufnr = 0,
     -- unpack typing isn't supported in luals
     ---@diagnostic disable-next-line: assign-type-mismatch
-    pos = row ~= nil and col ~= nil and unpack({ row, col }) or nil,
+    pos = { row, col },
   })
   while node and type and not node_is_type(node, type) do
     node = node:parent()
@@ -138,7 +131,7 @@ local function node_at_pos(type, row, col)
 end
 
 ---@param node TSNode
----@return (TSNode|nil)
+---@return TSNode|nil
 local function first_child_of_type(node, type)
   for child in node:iter_children() do
     if node_is_type(child, type) then
@@ -160,15 +153,15 @@ local function children_of_type(node, type)
 end
 
 ---@param type string
----@return (TSNode|nil)
+---@return TSNode|nil
 local function node_at_cursor(type)
-  local _, row, col = vim.fn.getcurpos(0)
+  local row, col = get_cursor()
   return node_at_pos(type, row, col)
 end
 
 ---@param node TSNode
 ---@param type string
----@return (TSNode|nil)
+---@return TSNode|nil
 local function next_node(node, type)
   local next = node:next_sibling()
   while next and type and not node_is_type(next, type) do
@@ -179,7 +172,7 @@ end
 
 ---@param node TSNode
 ---@param type string
----@return (TSNode|nil)
+---@return TSNode|nil
 local function prev_node(node, type)
   local prev = node:prev_sibling()
   while prev and type and not node_is_type(prev, type) do
@@ -198,7 +191,9 @@ end
 
 ---@param str string|nil
 local function is_whitespace_or_empty(str)
-  if str == nil then return true end
+  if str == nil then
+    return true
+  end
   return str:match("^%s*$") ~= nil
 end
 
@@ -310,7 +305,7 @@ function M.goto_next(type)
   dot_repeatable(function()
     local node = node_at_cursor(type)
     if not node then
-      return nil
+      return
     end
     local next = next_node(node, type)
     if next then
@@ -324,7 +319,7 @@ function M.goto_prev(type)
   dot_repeatable(function()
     local node = node_at_cursor(type)
     if not node then
-      return nil
+      return
     end
     local prev = prev_node(node, type)
     if prev then
@@ -424,36 +419,35 @@ function M.wrap()
         -- user cancelled input
         return
       end
+
       dot_repeatable(function(is_dot_repeat)
         local insert_new_lines = false
         ---@type number|nil
         local start_row = nil
         ---@type number|nil
         local start_col = nil
-        ---@pyte number|nil
+        ---@type number|nil
         local end_row = nil
-        ---@pyte number|nil
+        ---@type number|nil
         local end_col = nil
+        ---@type string
 
-        -- if is_dot_repeat then
-        --   mode = vim.fn.mode()
-        --   vim.notify(mode)
-        --   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', false, true, true), 'nx', false)
-        -- end
+        if is_dot_repeat and (mode == "v" or mode == "V") then
+          vim.notify(
+            "Dot repeating a wrap of a visual selection is not supported; falling back to wrapping the entire element at the cursor",
+            vim.log.levels.WARN
+          )
+          mode = "n"
+        end
 
-        if mode == "v" then
+        if mode == "v" or mode == "V" then
           _, start_row, start_col = unpack(vim.fn.getpos("'<"))
           _, end_row, end_col = unpack(vim.fn.getpos("'>"))
-          start_row = start_row - 1
           start_col = start_col - 1
+          start_row = start_row - 1
+          end_col = math.min(end_col, string.len(vim.fn.getline(end_row)))
           end_row = end_row - 1
-          end_col = end_col
-          -- vim.notify(string.format("%s %s %s %s", start_row, start_col, end_row, end_col))
-          insert_new_lines = false
-        elseif mode == "V" then
-          _, start_row, start_col = vim.fn.getpos(".")
-          _, end_row, end_col = vim.fn.getpos("v")
-          insert_new_lines = true
+          insert_new_lines = mode == "V"
         else
           local element = node_at_cursor("element")
           if element then
@@ -463,12 +457,13 @@ function M.wrap()
             -- check if element doesn't share lines with any other content.
             -- if it does, wrap without using new lines.
             ---@type string
-            local start_line = vim.api.nvim_buf_get_lines(0, start_row, start_row+1, false)[1]
+            local start_line = vim.api.nvim_buf_get_lines(0, start_row, start_row + 1, false)[1]
             ---@type string
-            local end_line = vim.api.nvim_buf_get_lines(0, end_row, end_row+1, false)[1]
+            local end_line = vim.api.nvim_buf_get_lines(0, end_row, end_row + 1, false)[1]
             local text_before_element = start_line:sub(0, start_col)
-            local text_after_element = end_line:sub(end_col+1)
-            insert_new_lines = is_whitespace_or_empty(text_before_element) and is_whitespace_or_empty(text_after_element)
+            local text_after_element = end_line:sub(end_col + 1)
+            insert_new_lines = is_whitespace_or_empty(text_before_element)
+              and is_whitespace_or_empty(text_after_element)
           end
         end
 
@@ -480,9 +475,10 @@ function M.wrap()
         local new_end_tag_text = string.format("</%s>", new_tag_name)
 
         if insert_new_lines then
-          insert_text_at_pos(end_row, end_col, { "", new_end_tag_text })
-          insert_text_at_pos(start_row, start_col, { new_start_tag_text, "" })
-          goto_pos(start_row, start_col)
+          local indentation = string.rep(" ", vim.fn.indent(start_row))
+          insert_text_at_pos(end_row, end_col, { "", indentation .. new_end_tag_text })
+          insert_text_at_pos(start_row, start_col, { new_start_tag_text, indentation })
+          set_cursor(start_row, start_col)
           treesitter_reparse()
           local new_element = node_at_cursor("element")
           if new_element then
