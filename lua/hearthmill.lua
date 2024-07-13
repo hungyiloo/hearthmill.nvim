@@ -10,6 +10,8 @@ M.type_aliases_map = {
     "jsx_closing_element",
     "jsx_self_closing_element",
   },
+  start_tag = { "start_tag", "jsx_opening_element" },
+  end_tag = { "end_tag", "jsx_closing_element" },
   attribute = { "attribute", "jsx_attribute" },
   tag_name = { "tag_name", "identifier" },
 }
@@ -38,22 +40,35 @@ end
 
 local function get_cursor()
   local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+  -- convert from 1-indexed rows to 0-indexed, for consistency with treesitter node positions
   return row - 1, col
 end
 
 ---@param row integer
 ---@param col integer
 local function set_cursor(row, col)
-  vim.api.nvim_win_set_cursor(0, { row + 1, col })
+  -- convert from 0-indexed treesitter rows to 1-indexed for vim API.
+  -- also add safety clamping to all the values.
+  row = math.max(1, math.min(row + 1, vim.api.nvim_buf_line_count(0)))
+  col = math.max(0, math.min(col, string.len(vim.fn.getline(row)) - 1))
+  vim.api.nvim_win_set_cursor(0, { row, col })
+end
+
+---@param from_row integer
+---@param from_col integer
+---@param to_row integer
+---@param to_col integer
+local function mark_range(from_row, from_col, to_row, to_col)
+  set_cursor(from_row, from_col)
+  normal("v")
+  set_cursor(to_row, to_col)
 end
 
 ---@param node TSNode
 local function mark_node(node)
   local from_row, from_col = node:start()
   local to_row, to_col = node:end_()
-  set_cursor(from_row, from_col)
-  normal("v")
-  set_cursor(to_row, to_col - 1)
+  mark_range(from_row, from_col, to_row, to_col - 1)
 end
 
 ---@param node TSNode
@@ -92,8 +107,10 @@ local function treesitter_reparse()
   vim.treesitter.get_parser():parse()
 end
 
+-- Collapses a single space before or after the cursor.
+-- Useful to keep things tidy when removing elements or attributes that are
+-- adjacent to other content.
 local function collapse_blank_spaces()
-  -- collapse a single space before or after the cursor
   local _, cursor_col = get_cursor()
   local cursor_char = vim.api.nvim_get_current_line():sub(cursor_col + 1, cursor_col + 1)
   if cursor_char == " " then
@@ -106,7 +123,10 @@ local function collapse_blank_spaces()
   end
 end
 
-local function collapse_blank_lines()
+-- Deletes the line at the cursor if it's only whitespace.
+-- Useful when removing elements or attributes don't share lines with other
+-- content, which means the remaining newline can be removed.
+local function collapse_blank_line()
   -- delete the line if it's blank
   vim.cmd([[silent! s/^\s*$\n//]])
   -- hide search highlights
@@ -160,10 +180,13 @@ local function node_at_cursor(type)
 end
 
 ---@param node TSNode
----@param type string
+---@param type string|nil
 ---@return TSNode|nil
 local function next_node(node, type)
   local next = node:next_sibling()
+  if not type then
+    return next
+  end
   while next and type and not node_is_type(next, type) do
     next = next:next_sibling()
   end
@@ -171,10 +194,13 @@ local function next_node(node, type)
 end
 
 ---@param node TSNode
----@param type string
+---@param type string|nil
 ---@return TSNode|nil
 local function prev_node(node, type)
   local prev = node:prev_sibling()
+  if not type then
+    return prev
+  end
   while prev and type and not node_is_type(prev, type) do
     prev = prev:prev_sibling()
   end
@@ -240,13 +266,72 @@ function M.select(type)
 end
 
 ---@param type string
+function M.select_contents(type)
+  dot_repeatable(function()
+    local node = node_at_cursor(type)
+    if not node then
+      return
+    end
+
+    if type == "element" then
+      local start_tag = first_child_of_type(node, "start_tag")
+      local end_tag = first_child_of_type(node, "end_tag")
+      if not start_tag or not end_tag then
+        return
+      end
+      local node_after_start_tag = next_node(start_tag)
+      local node_before_end_tag = prev_node(end_tag)
+      if not node_after_start_tag or not node_before_end_tag then
+        return
+      end
+
+      local from_row, from_col = start_tag:end_()
+      local to_row, to_col = end_tag:start()
+
+      -- These shenanigans are to select all whitespace, including linebreaks,
+      -- so that if the contents is deleted, we're left with two adjacent
+      -- start/end tags. There could be a much more elegant way to do this, but
+      -- so far it's eluded me.
+      local row_node_after_start_tag = node_after_start_tag:start()
+      local row_node_before_end_tag = node_before_end_tag:end_()
+      mark_node(node)
+      set_cursor(to_row, to_col)
+      if row_node_before_end_tag < to_row and to_col == 0 then
+        normal("k$")
+      else
+        normal("h")
+      end
+      normal("o")
+      set_cursor(from_row, from_col)
+      if row_node_after_start_tag > from_row then
+        normal("l")
+      end
+      normal("o")
+
+    elseif type == "attribute" then
+      local second_child = node:child(2)
+      if not second_child then
+        return
+      end
+      mark_node(second_child)
+    elseif type == "tag" then
+      local tag_name = first_child_of_type(node, "tag_name")
+      if not tag_name then
+        return
+      end
+      mark_node(tag_name)
+    end
+  end)
+end
+
+---@param type string
 function M.delete(type)
   dot_repeatable(function()
     local node = node_at_cursor(type)
     if node then
       delete_node(node)
       collapse_blank_spaces()
-      collapse_blank_lines()
+      collapse_blank_line()
     end
   end)
 end
@@ -358,12 +443,12 @@ function M.vanish()
       if end_tag then
         delete_node(end_tag)
         goto_node_start(end_tag)
-        collapse_blank_lines()
+        collapse_blank_line()
       end
       if start_tag then
         delete_node(start_tag)
         goto_node_start(start_tag)
-        collapse_blank_lines()
+        collapse_blank_line()
       end
 
       mark_node(element)
