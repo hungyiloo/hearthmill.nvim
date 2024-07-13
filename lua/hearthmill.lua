@@ -281,6 +281,26 @@ function M.transpose(type)
 end
 
 ---@param type string
+function M.transpose_backward(type)
+  dot_repeatable(function()
+    local node = node_at_cursor(type)
+    if not node then
+      return
+    end
+    local prev = prev_node(node, type)
+    if node and prev then
+      local node_text = node_to_string(node)
+      local prev_text = node_to_string(prev)
+      replace_node(node, prev_text)
+      replace_node(prev, node_text)
+
+      -- set the cursor position at a sane position, best effort
+      goto_node_start(prev)
+    end
+  end)
+end
+
+---@param type string
 function M.goto_beginning(type)
   dot_repeatable(function()
     local node = node_at_cursor(type)
