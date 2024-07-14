@@ -26,6 +26,20 @@ local function normal(keystrokes)
   vim.cmd("normal! " .. keystrokes)
 end
 
+---@param str string|nil
+local function is_whitespace_or_empty(str)
+  if str == nil then
+    return true
+  end
+  return str:match("^%s*$") ~= nil
+end
+
+---@param lnum integer
+local function line_indentation(lnum)
+  -- remember: vim API line numbers are 1-indexed
+  return string.rep(" ", vim.fn.indent(lnum + 1))
+end
+
 ---@param node TSNode
 local function node_is_type(node, target_type)
   local matching_types = M.type_aliases_map[target_type] or { target_type }
@@ -105,6 +119,20 @@ end
 ---@param node TSNode
 local function delete_node(node)
   replace_node(node, { "" })
+end
+
+-- Returns true if the node occupies the entirety of its own lines,
+-- or false if it shares any of its lines with other nodes
+---@param node TSNode
+local function occupies_own_lines(node)
+  local start_row, start_col = node:start()
+  local end_row, end_col = node:end_()
+
+  local start_line = vim.api.nvim_buf_get_lines(0, start_row, start_row + 1, false)[1]
+  local end_line = vim.api.nvim_buf_get_lines(0, end_row, end_row + 1, false)[1]
+  local text_before_element = start_line:sub(0, start_col)
+  local text_after_element = end_line:sub(end_col + 1)
+  return is_whitespace_or_empty(text_before_element) and is_whitespace_or_empty(text_after_element)
 end
 
 local function treesitter_reparse()
@@ -230,14 +258,6 @@ local function node_to_string(node)
   local from_row, from_col = node:start()
   local to_row, to_col = node:end_()
   return vim.api.nvim_buf_get_text(0, from_row, from_col, to_row, to_col, {})
-end
-
----@param str string|nil
-local function is_whitespace_or_empty(str)
-  if str == nil then
-    return true
-  end
-  return str:match("^%s*$") ~= nil
 end
 
 M.__last_op = nil
@@ -587,17 +607,9 @@ function M.wrap()
           if element then
             start_row, start_col = element:start()
             end_row, end_col = element:end_()
-
             -- check if element doesn't share lines with any other content.
             -- if it does, wrap without using new lines.
-            ---@type string
-            local start_line = vim.api.nvim_buf_get_lines(0, start_row, start_row + 1, false)[1]
-            ---@type string
-            local end_line = vim.api.nvim_buf_get_lines(0, end_row, end_row + 1, false)[1]
-            local text_before_element = start_line:sub(0, start_col)
-            local text_after_element = end_line:sub(end_col + 1)
-            insert_new_lines = is_whitespace_or_empty(text_before_element)
-              and is_whitespace_or_empty(text_after_element)
+            insert_new_lines = occupies_own_lines(element)
           end
         end
 
@@ -609,7 +621,7 @@ function M.wrap()
         local new_end_tag_text = string.format("</%s>", new_tag_name)
 
         if insert_new_lines then
-          local indentation = string.rep(" ", vim.fn.indent(start_row))
+          local indentation = line_indentation(start_row)
           insert_text_at_pos(end_row, end_col, { "", indentation .. new_end_tag_text })
           insert_text_at_pos(start_row, start_col, { new_start_tag_text, indentation })
           set_cursor(start_row, start_col)
@@ -626,6 +638,34 @@ function M.wrap()
       end)
     end
   )
+end
+
+---@param type string
+function M.clone(type)
+  dot_repeatable(function()
+    local node = node_at_cursor(type)
+    if not node then
+      return
+    end
+    local insert_new_lines = occupies_own_lines(node)
+    local row, col = node:end_()
+    local text_to_insert = node_to_string(node)
+    if insert_new_lines then
+      table.insert(text_to_insert, 1, "")
+      text_to_insert[2] = line_indentation(row) .. text_to_insert[2]
+    else
+      -- add a space when cloning adjacently; this seems appropriate in the majority of cases
+      text_to_insert[1] = " " .. text_to_insert[1]
+    end
+    insert_text_at_pos(row, col, text_to_insert)
+
+    treesitter_reparse()
+    node = node_at_cursor(type)
+    local cloned_node = node and next_node(node)
+    if cloned_node then
+      goto_node_start(cloned_node)
+    end
+  end)
 end
 
 return M
