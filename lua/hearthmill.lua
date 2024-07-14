@@ -60,7 +60,11 @@ end
 ---@param to_col integer
 local function mark_range(from_row, from_col, to_row, to_col)
   set_cursor(from_row, from_col)
-  normal("v")
+  if vim.fn.mode() ~= "v" then
+    normal("v")
+  else
+    normal("o")
+  end
   set_cursor(to_row, to_col)
 end
 
@@ -265,7 +269,7 @@ local function dot_repeatable(f)
     is_dot_repeat = true
   end
   vim.go.operatorfunc = "v:lua.require'hearthmill'.__last_op"
-  normal("g@l")
+  M.__last_op()
 end
 
 ---@param type string
