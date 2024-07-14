@@ -462,7 +462,7 @@ function M.goto_prev(type)
   end)
 end
 
-function M.vanish()
+function M.unwrap()
   dot_repeatable(function()
     local element = node_at_cursor("element")
     if element then
