@@ -425,9 +425,22 @@ end
 function M.goto_beginning(type)
   dot_repeatable(function()
     local node = node_at_cursor(type)
-    if node then
-      goto_node_start(node)
+    if not node then
+      return
     end
+
+    -- If already at the start of an element, cleverly go to the start of the
+    -- *previous* element. This makes selecting multiple siblings much easier.
+    local cursor_row, cursor_col = get_cursor()
+    local node_row, node_col = node:start()
+    if cursor_row == node_row and cursor_col == node_col then
+      node = prev_node(node, type)
+    end
+    if not node then
+      return
+    end
+
+    goto_node_start(node)
   end)
 end
 
@@ -435,9 +448,22 @@ end
 function M.goto_end(type)
   dot_repeatable(function()
     local node = node_at_cursor(type)
-    if node then
-      goto_node_end(node)
+    if not node then
+      return
     end
+
+    -- If already at the end of an element, cleverly go to the end of the
+    -- *next* element. This makes selecting multiple siblings much easier.
+    local cursor_row, cursor_col = get_cursor()
+    local node_row, node_col = node:end_()
+    if cursor_row == node_row and cursor_col == node_col - 1 then
+      node = next_node(node, type)
+    end
+    if not node then
+      return
+    end
+
+    goto_node_end(node)
   end)
 end
 
