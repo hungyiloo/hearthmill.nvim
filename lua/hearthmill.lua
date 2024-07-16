@@ -41,6 +41,14 @@ local function line_indentation(lnum)
 end
 
 ---@param node TSNode
+---@return string[]
+local function node_to_string(node)
+  local from_row, from_col = node:start()
+  local to_row, to_col = node:end_()
+  return vim.api.nvim_buf_get_text(0, from_row, from_col, to_row, to_col, {})
+end
+
+---@param node TSNode
 local function node_is_type(node, target_type)
   local matching_types = M.type_aliases_map[target_type] or { target_type }
   local node_type = node:type()
@@ -118,6 +126,10 @@ end
 
 ---@param node TSNode
 local function delete_node(node)
+  local node_text = table.concat(node_to_string(node), "\n")
+  vim.fn.setreg('*', node_text)
+  vim.fn.setreg('+', node_text)
+  vim.fn.setreg('', node_text)
   replace_node(node, { "" })
 end
 
@@ -146,11 +158,11 @@ local function collapse_blank_spaces()
   local _, cursor_col = get_cursor()
   local cursor_char = vim.api.nvim_get_current_line():sub(cursor_col + 1, cursor_col + 1)
   if cursor_char == " " then
-    normal("x")
+    normal('"_x')
   else
     cursor_char = vim.api.nvim_get_current_line():sub(cursor_col, cursor_col)
     if cursor_char == " " then
-      normal("X")
+      normal('"_X')
     end
   end
 end
@@ -250,14 +262,6 @@ local function prev_node(node, type)
     prev = prev:prev_sibling()
   end
   return prev
-end
-
----@param node TSNode
----@return string[]
-local function node_to_string(node)
-  local from_row, from_col = node:start()
-  local to_row, to_col = node:end_()
-  return vim.api.nvim_buf_get_text(0, from_row, from_col, to_row, to_col, {})
 end
 
 M.__last_op = nil
