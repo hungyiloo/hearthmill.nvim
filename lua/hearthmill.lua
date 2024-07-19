@@ -14,6 +14,7 @@ M.type_aliases_map = {
   end_tag = { "end_tag", "jsx_closing_element" },
   attribute = { "attribute", "jsx_attribute" },
   tag_name = { "tag_name", "identifier" },
+  angled_brackets = { "<", ">" },
 }
 
 function M.setup(opts)
@@ -127,24 +128,33 @@ end
 ---@param node TSNode
 local function delete_node(node)
   local node_text = table.concat(node_to_string(node), "\n")
-  vim.fn.setreg('*', node_text)
-  vim.fn.setreg('+', node_text)
-  vim.fn.setreg('', node_text)
+  vim.fn.setreg("*", node_text)
+  vim.fn.setreg("+", node_text)
+  vim.fn.setreg("", node_text)
   replace_node(node, { "" })
+end
+
+---@param node TSNode
+local function occupies_own_start_line(node)
+  local start_row, start_col = node:start()
+  local start_line = vim.api.nvim_buf_get_lines(0, start_row, start_row + 1, false)[1]
+  local text_before_element = start_line:sub(0, start_col)
+  return is_whitespace_or_empty(text_before_element)
+end
+
+---@param node TSNode
+local function occupies_own_end_line(node)
+  local end_row, end_col = node:end_()
+  local end_line = vim.api.nvim_buf_get_lines(0, end_row, end_row + 1, false)[1]
+  local text_after_element = end_line:sub(end_col + 1)
+  return is_whitespace_or_empty(text_after_element)
 end
 
 -- Returns true if the node occupies the entirety of its own lines,
 -- or false if it shares any of its lines with other nodes
 ---@param node TSNode
 local function occupies_own_lines(node)
-  local start_row, start_col = node:start()
-  local end_row, end_col = node:end_()
-
-  local start_line = vim.api.nvim_buf_get_lines(0, start_row, start_row + 1, false)[1]
-  local end_line = vim.api.nvim_buf_get_lines(0, end_row, end_row + 1, false)[1]
-  local text_before_element = start_line:sub(0, start_col)
-  local text_after_element = end_line:sub(end_col + 1)
-  return is_whitespace_or_empty(text_before_element) and is_whitespace_or_empty(text_after_element)
+  return occupies_own_start_line(node) and occupies_own_end_line(node)
 end
 
 local function treesitter_reparse()
@@ -694,6 +704,43 @@ function M.clone(type)
     local cloned_node = node and next_node(node)
     if cloned_node then
       goto_node_start(cloned_node)
+    end
+  end)
+end
+
+---@param type string
+function M.break_lines(type)
+  dot_repeatable(function()
+    local node = node_at_cursor(type)
+    if not node then
+      return
+    end
+    local child_count = node:child_count()
+    for i = child_count, 1, -1 do
+      local child = node:child(i - 1)
+      if child and not node_is_type(child, "tag_name") and not node_is_type(child, "angled_brackets") then
+        if i == child_count and not occupies_own_end_line(child) then
+          local end_row, end_col = child:end_()
+          insert_text_at_pos(end_row, end_col, { "", line_indentation(end_row) })
+        end
+        if not occupies_own_start_line(child) then
+          local start_row, start_col = child:start()
+          insert_text_at_pos(start_row, start_col, { "", line_indentation(start_row) })
+        end
+      end
+    end
+
+    treesitter_reparse()
+    node = node_at_cursor(type)
+    if node then
+      -- clean up trailing white space, best effort
+      mark_node(node)
+      normal(":s/\\s\\+$//")
+      normal(":noh")
+
+      -- format nicely, best effort
+      mark_node(node)
+      normal("=")
     end
   end)
 end
