@@ -382,6 +382,9 @@ function M.delete(type)
       delete_node(node)
       collapse_blank_spaces()
       collapse_blank_line()
+
+      -- format the line that we're on to tidy things up, best effort
+      normal("==")
     end
   end)
 end
