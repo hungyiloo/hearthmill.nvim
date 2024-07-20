@@ -184,7 +184,7 @@ local function collapse_blank_line()
   -- delete the line if it's blank
   vim.cmd([[silent! s/^\s*$\n//]])
   -- hide search highlights
-  vim.cmd(":noh")
+  vim.cmd("noh")
 end
 
 ---@param type string
@@ -735,8 +735,8 @@ function M.break_lines(type)
     if node then
       -- clean up trailing white space, best effort
       mark_node(node)
-      normal(":s/\\s\\+$//")
-      normal(":noh")
+      vim.cmd([[silent! '<,'>s/\s\+$//]])
+      vim.cmd("noh")
 
       -- format nicely, best effort
       mark_node(node)
