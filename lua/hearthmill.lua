@@ -15,6 +15,7 @@ M.type_aliases_map = {
   attribute = { "attribute", "jsx_attribute" },
   tag_name = { "tag_name", "identifier" },
   angled_brackets = { "<", ">" },
+  content = { "text", "interpolation" }
 }
 
 function M.setup(opts)
@@ -721,8 +722,8 @@ function M.break_lines(type)
     local child_count = node:child_count()
     for i = child_count, 1, -1 do
       local child = node:child(i - 1)
-      if child and not node_is_type(child, "tag_name") and not node_is_type(child, "angled_brackets") then
-        if i == child_count and not occupies_own_end_line(child) then
+      if child and not node_is_type(child, "content") and not node_is_type(child, "tag_name") and not node_is_type(child, "angled_brackets") then
+        if (i == child_count or i == 1) and not occupies_own_end_line(child) then
           local end_row, end_col = child:end_()
           insert_text_at_pos(end_row, end_col, { "", line_indentation(end_row) })
         end
@@ -736,9 +737,11 @@ function M.break_lines(type)
     treesitter_reparse()
     node = node_at_cursor(type)
     if node then
-      -- clean up trailing white space, best effort
+      -- clean up trailing white space and blank lines, best effort
       mark_node(node)
+      normal("v")
       vim.cmd([[silent! '<,'>s/\s\+$//]])
+      vim.cmd([[silent! '<,'>s/\n\n/\r/g]])
       vim.cmd("noh")
 
       -- format nicely, best effort
