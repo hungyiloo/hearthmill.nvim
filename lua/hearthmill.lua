@@ -13,7 +13,7 @@ M.type_aliases_map = {
   start_tag = { "start_tag", "jsx_opening_element" },
   end_tag = { "end_tag", "jsx_closing_element" },
   attribute = { "attribute", "jsx_attribute" },
-  tag_name = { "tag_name", "identifier" },
+  tag_name = { "tag_name", "identifier", "member_expression" },
   angled_brackets = { "<", ">" },
   content = { "text", "interpolation" }
 }
