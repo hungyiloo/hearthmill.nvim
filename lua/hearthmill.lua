@@ -83,6 +83,8 @@ end
 ---@param to_row integer
 ---@param to_col integer
 local function mark_range(from_row, from_col, to_row, to_col)
+  local existing_virtualedit = vim.o.virtualedit
+  vim.o.virtualedit = "onemore"
   set_cursor(from_row, from_col)
   if vim.fn.mode() ~= "v" then
     normal("v")
@@ -90,6 +92,7 @@ local function mark_range(from_row, from_col, to_row, to_col)
     normal("o")
   end
   set_cursor(to_row, to_col)
+  vim.o.virtualedit = existing_virtualedit
 end
 
 ---@param node TSNode
