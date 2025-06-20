@@ -492,17 +492,41 @@ end
 ---@param type string
 function M.goto_next(type)
   dot_repeatable(function()
-    -- TODO: Figure out how to go to the next node of type even when cursor is
-    --       not on node of type. Same for previous. This would let us jump to
-    --       the next relevant node without having to position the cursor as
-    --       carefully (e.g. node is on start tag name, jump to first attribute)
+    local cursor_row, cursor_col = get_cursor()
     local node = node_at_cursor(type)
-    if not node then
-      return
-    end
-    local next = next_node(node, type)
-    if next then
-      goto_node_start(next)
+
+    if node then
+      -- If we're on a node of the target type, go to the next one
+      local next = next_node(node, type)
+      if next then
+        goto_node_start(next)
+      end
+    else
+      -- If we're not on a node of the target type, find the first one after the cursor
+      local root = vim.treesitter.get_parser():parse()[1]:root()
+
+      local function find_next_node_of_type(current_node, target_type, after_row, after_col)
+        if node_is_type(current_node, target_type) then
+          local node_row, node_col = current_node:start()
+          if node_row > after_row or (node_row == after_row and node_col > after_col) then
+            return current_node
+          end
+        end
+
+        for child in current_node:iter_children() do
+          local result = find_next_node_of_type(child, target_type, after_row, after_col)
+          if result then
+            return result
+          end
+        end
+
+        return nil
+      end
+
+      local next_node_found = find_next_node_of_type(root, type, cursor_row, cursor_col)
+      if next_node_found then
+        goto_node_start(next_node_found)
+      end
     end
   end)
 end
@@ -523,13 +547,37 @@ end
 ---@param type string
 function M.goto_prev(type)
   dot_repeatable(function()
+    local cursor_row, cursor_col = get_cursor()
     local node = node_at_cursor(type)
-    if not node then
-      return
-    end
-    local prev = prev_node(node, type)
-    if prev then
-      goto_node_start(prev)
+
+    if node then
+      -- If we're on a node of the target type, go to the previous one
+      local prev = prev_node(node, type)
+      if prev then
+        goto_node_start(prev)
+      end
+    else
+      -- If we're not on a node of the target type, find the last one before the cursor
+      local root = vim.treesitter.get_parser():parse()[1]:root()
+      local found_node = nil
+
+      local function find_prev_node_of_type(current_node, target_type, before_row, before_col)
+        if node_is_type(current_node, target_type) then
+          local node_row, node_col = current_node:start()
+          if node_row < before_row or (node_row == before_row and node_col < before_col) then
+            found_node = current_node
+          end
+        end
+
+        for child in current_node:iter_children() do
+          find_prev_node_of_type(child, target_type, before_row, before_col)
+        end
+      end
+
+      find_prev_node_of_type(root, type, cursor_row, cursor_col)
+      if found_node then
+        goto_node_start(found_node)
+      end
     end
   end)
 end
