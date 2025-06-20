@@ -23,6 +23,7 @@ function M.setup(opts)
   M.type_aliases_map = opts.type_aliases_map or M.type_aliases_map
 end
 
+-- TODO: Refactor internal methods to other files
 ---@param keystrokes string
 local function normal(keystrokes)
   vim.cmd("normal! " .. keystrokes)
@@ -491,6 +492,10 @@ end
 ---@param type string
 function M.goto_next(type)
   dot_repeatable(function()
+    -- TODO: Figure out how to go to the next node of type even when cursor is
+    --       not on node of type. Same for previous. This would let us jump to
+    --       the next relevant node without having to position the cursor as
+    --       carefully (e.g. node is on start tag name, jump to first attribute)
     local node = node_at_cursor(type)
     if not node then
       return
@@ -753,5 +758,80 @@ function M.break_lines(type)
     end
   end)
 end
+
+function M.toggle_self_closing_element()
+  dot_repeatable(function()
+    local element = node_at_cursor("element")
+    if not element then
+      return
+    end
+
+    local tag = first_child_of_type(element, "tag")
+
+    -- Check if it's already a self-closing element
+    if node_is_type(element, "jsx_self_closing_element") or (tag and node_is_type(tag, "self_closing_tag")) then
+      -- Convert self-closing to regular element
+      local element_text = table.concat(node_to_string(element), "\n")
+
+      -- Extract tag name and attributes from self-closing element
+      local tag_name_match = element_text:match("<([%w%-:]+)")
+      local attributes_match = element_text:match("<[%w%-:]+%s*(.-)%s*/?%s*>")
+
+      if not tag_name_match then
+        return
+      end
+
+      -- Build new element text
+      local start_tag = "<" .. tag_name_match
+      if attributes_match and attributes_match:match("%S") then
+        start_tag = start_tag .. " " .. attributes_match:gsub("/%s*$", "")
+      end
+      start_tag = start_tag .. ">"
+
+      local end_tag = "</" .. tag_name_match .. ">"
+      local new_element_text = { start_tag .. end_tag }
+
+      replace_node(element, new_element_text)
+
+      -- Position cursor between the tags
+      treesitter_reparse()
+      local new_element = node_at_cursor("element")
+      if new_element then
+        local start_tag_node = first_child_of_type(new_element, "start_tag")
+        if start_tag_node then
+          local _, end_col = start_tag_node:end_()
+          local row, _ = start_tag_node:start()
+          set_cursor(row, end_col)
+        end
+      end
+    else
+      -- Convert regular element to self-closing
+      local start_tag = first_child_of_type(element, "start_tag")
+
+      if not start_tag then
+        return
+      end
+
+      -- Get start tag content and modify it to be self-closing
+      local start_tag_text = table.concat(node_to_string(start_tag), "\n")
+      local self_closing_text = start_tag_text:gsub(">%s*$", "/>")
+
+      replace_node(element, { self_closing_text })
+
+      -- Position cursor at the end of the new self-closing tag
+      treesitter_reparse()
+      local new_element = node_at_cursor("element")
+      if new_element then
+        goto_node_end(new_element)
+      end
+    end
+  end)
+end
+
+
+-- TODO: new operation: selection expand and contract?
+-- TODO: new operation: insert/add attribute
+-- TODO: new operation: insert html entity/character reference (see ./data/entities.json)
+-- TODO: write tests (try https://github.com/echasnovski/mini.test)
 
 return M
