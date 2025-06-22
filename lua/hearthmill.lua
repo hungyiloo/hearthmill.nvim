@@ -1059,7 +1059,6 @@ function M.hoist(type)
         table.insert(start_tag_text, #start_tag_text + 1, parent_indentation)
         end_tag_text[1] = parent_indentation .. end_tag_text[1]
         table.insert(end_tag_text, 1, "")
-        table.insert(end_tag_text, #end_tag_text + 1, "")
         insert_text_at_pos(parent_end_row, parent_end_col, end_tag_text)
         insert_text_at_pos(parent_start_row, parent_start_col, start_tag_text)
 
