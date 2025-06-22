@@ -884,7 +884,7 @@ function M.add(type)
       vim.notify("No element found at cursor", vim.log.levels.WARN)
       return
     end
-    
+
     local start_tag = first_child_of_type(element, "start_tag")
     if not start_tag then
       vim.notify("No start tag found", vim.log.levels.WARN)
@@ -908,7 +908,7 @@ function M.add(type)
               if not current_element then
                 return
               end
-              
+
               local current_start_tag = first_child_of_type(current_element, "start_tag")
               if not current_start_tag then
                 return
@@ -948,9 +948,9 @@ function M.add(type)
           local cursor_row, cursor_col = get_cursor()
           local start_tag = "<" .. element_name .. ">"
           local end_tag = "</" .. element_name .. ">"
-          
+
           insert_text_at_pos(cursor_row, cursor_col, { start_tag .. end_tag })
-          
+
           -- Position cursor between the tags
           set_cursor(cursor_row, cursor_col + string.len(start_tag))
         end)
