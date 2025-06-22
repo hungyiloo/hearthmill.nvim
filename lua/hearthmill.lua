@@ -959,6 +959,176 @@ function M.add(type)
   end
 end
 
+---@param type string
+function M.hoist(type)
+  dot_repeatable(function()
+    if type == "element" then
+      local element = node_at_cursor("element")
+      if not element then
+        return
+      end
+
+      local parent_element = first_ancestor_of_type(element, "element")
+      if not parent_element then
+        return
+      end
+
+      -- Get the element text before we delete it
+      local element_text = node_to_string(element)
+      local parent_element_occupies_own_lines = occupies_own_lines(parent_element)
+
+      -- Delete the current element
+      delete_node(element)
+      collapse_blank_spaces()
+      collapse_blank_line()
+
+      -- Insert the element before the parent element
+      local parent_start_row, parent_start_col = parent_element:start()
+
+      if parent_element_occupies_own_lines then
+        local parent_indentation = line_indentation(parent_start_row)
+        table.insert(element_text, #element_text + 1, parent_indentation .. "")
+      else
+        element_text[1] = element_text[1] .. " "
+      end
+
+      insert_text_at_pos(parent_start_row, parent_start_col, element_text)
+
+      -- Position cursor at the hoisted element
+      treesitter_reparse()
+      local hoisted_element = node_at_pos("element", parent_start_row, parent_start_col)
+      if hoisted_element then
+        goto_node_start(hoisted_element)
+        -- format nicely, best effort
+        mark_node(hoisted_element)
+        normal("=")
+      end
+
+    elseif type == "tag" then
+      local element = node_at_cursor("element")
+      if not element then
+        return
+      end
+
+      local parent_element = first_ancestor_of_type(element, "element")
+      if not parent_element then
+        return
+      end
+      local parent_start_row, parent_start_col = parent_element:start()
+
+      -- Get the tag information before unwrapping
+      local start_tag = first_child_of_type(element, "start_tag")
+      local end_tag = first_child_of_type(element, "end_tag")
+
+      if not start_tag then
+        return
+      end
+
+      local tag_name_node = first_child_of_type(start_tag, "tag_name")
+      if not tag_name_node then
+        return
+      end
+
+      -- Unwrap the current element
+      local end_tag_text = {}
+      local start_tag_text = {}
+      if end_tag then
+        end_tag_text = node_to_string(end_tag)
+        delete_node(end_tag)
+        collapse_blank_line()
+      end
+      if start_tag then
+        start_tag_text = node_to_string(start_tag)
+        delete_node(start_tag)
+        collapse_blank_line()
+      end
+
+      treesitter_reparse()
+
+      -- Now wrap the parent element with the saved tags
+      local updated_parent = node_at_pos("element", parent_start_row, parent_start_col)
+      if not updated_parent then
+        return
+      end
+
+      local parent_end_row, parent_end_col = updated_parent:end_()
+      local parent_occupies_own_lines = occupies_own_lines(updated_parent)
+
+      if parent_occupies_own_lines then
+        local parent_indentation = line_indentation(parent_start_row)
+        table.insert(start_tag_text, #start_tag_text + 1, parent_indentation)
+        end_tag_text[1] = parent_indentation .. end_tag_text[1]
+        table.insert(end_tag_text, 1, "")
+        table.insert(end_tag_text, #end_tag_text + 1, "")
+        insert_text_at_pos(parent_end_row, parent_end_col, end_tag_text)
+        insert_text_at_pos(parent_start_row, parent_start_col, start_tag_text)
+
+        treesitter_reparse()
+        local new_element = node_at_pos("element", parent_start_row, parent_start_col)
+        if new_element then
+          mark_node(new_element)
+          normal("=")
+        end
+      else
+        insert_text_at_pos(parent_end_row, parent_end_col, end_tag_text)
+        insert_text_at_pos(parent_start_row, parent_start_col, start_tag_text)
+      end
+
+    elseif type == "attribute" then
+      local attribute = node_at_cursor("attribute")
+      if not attribute then
+        return
+      end
+
+      local current_element = first_ancestor_of_type(attribute, "element")
+      if not current_element then
+        return
+      end
+
+      local parent_element = first_ancestor_of_type(current_element, "element")
+      if not parent_element then
+        return
+      end
+      local parent_start_row, parent_start_col = parent_element:start()
+
+      local parent_start_tag = first_child_of_type(parent_element, "start_tag")
+      if not parent_start_tag then
+        return
+      end
+
+      -- Get the attribute text before deleting it
+      local attribute_text = node_to_string(attribute)
+
+      -- Delete the attribute from current element
+      delete_node(attribute)
+      collapse_blank_spaces()
+
+      treesitter_reparse()
+
+      -- Find the updated parent start tag and insert the attribute
+      local updated_parent = node_at_pos("element", parent_start_row, parent_start_col)
+      if not updated_parent then
+        return
+      end
+
+      local updated_parent_start_tag = first_child_of_type(updated_parent, "start_tag")
+      if not updated_parent_start_tag then
+        return
+      end
+
+      -- Insert attribute before the closing > of parent start tag
+      local insert_row, insert_col = updated_parent_start_tag:end_()
+      insert_col = insert_col - 1 -- Position before the >
+
+      local attr_text_to_insert = " " .. table.concat(attribute_text, "\n")
+      insert_text_at_pos(insert_row, insert_col, { attr_text_to_insert })
+
+      -- Position cursor at the moved attribute
+      set_cursor(insert_row, insert_col + string.len(attr_text_to_insert) - 1)
+    end
+  end)
+end
+
 -- TODO: new operation: selection expand and contract?
 -- TODO: new operation: insert html entity/character reference (see ./data/entities.json)
 -- TODO: write tests (try https://github.com/echasnovski/mini.test)
