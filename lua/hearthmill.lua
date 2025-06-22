@@ -878,10 +878,84 @@ end
 
 ---@param type string
 function M.add(type)
-// ai: implement this. `type` can be "element" or "attribute". 
-// ai: it should prompt the user for the name of the element/attribute to create using vim.ui.input.
-// ai: for an attribute, also prompt for the value. value can be empty. attributes are added to the end of the opening tag of the current element.
-// for an element, create the opening and closing tags and place the cursor between them. ai!
+  if type == "attribute" then
+    local element = node_at_cursor("element")
+    if not element then
+      vim.notify("No element found at cursor", vim.log.levels.WARN)
+      return
+    end
+    
+    local start_tag = first_child_of_type(element, "start_tag")
+    if not start_tag then
+      vim.notify("No start tag found", vim.log.levels.WARN)
+      return
+    end
+
+    vim.ui.input(
+      { prompt = "Attribute name: " },
+      ---@param attr_name string|nil
+      function(attr_name)
+        if attr_name == nil or attr_name == "" then
+          return
+        end
+
+        vim.ui.input(
+          { prompt = "Attribute value (optional): " },
+          ---@param attr_value string|nil
+          function(attr_value)
+            dot_repeatable(function()
+              local current_element = node_at_cursor("element")
+              if not current_element then
+                return
+              end
+              
+              local current_start_tag = first_child_of_type(current_element, "start_tag")
+              if not current_start_tag then
+                return
+              end
+
+              -- Find the position just before the closing >
+              local start_tag_text = table.concat(node_to_string(current_start_tag), "\n")
+              local insert_row, insert_col = current_start_tag:end_()
+              insert_col = insert_col - 1 -- Position before the >
+
+              -- Build attribute text
+              local attr_text = " " .. attr_name
+              if attr_value and attr_value ~= "" then
+                attr_text = attr_text .. '="' .. attr_value .. '"'
+              end
+
+              insert_text_at_pos(insert_row, insert_col, { attr_text })
+              
+              -- Position cursor after the inserted attribute
+              set_cursor(insert_row, insert_col + string.len(attr_text))
+            end)
+          end
+        )
+      end
+    )
+  elseif type == "element" then
+    vim.ui.input(
+      { prompt = "Element name: " },
+      ---@param element_name string|nil
+      function(element_name)
+        if element_name == nil or element_name == "" then
+          return
+        end
+
+        dot_repeatable(function()
+          local cursor_row, cursor_col = get_cursor()
+          local start_tag = "<" .. element_name .. ">"
+          local end_tag = "</" .. element_name .. ">"
+          
+          insert_text_at_pos(cursor_row, cursor_col, { start_tag .. end_tag })
+          
+          -- Position cursor between the tags
+          set_cursor(cursor_row, cursor_col + string.len(start_tag))
+        end)
+      end
+    )
+  end
 end
 
 -- TODO: new operation: selection expand and contract?
