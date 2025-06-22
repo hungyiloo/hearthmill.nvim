@@ -915,7 +915,6 @@ function M.add(type)
               end
 
               -- Find the position just before the closing >
-              local start_tag_text = table.concat(node_to_string(current_start_tag), "\n")
               local insert_row, insert_col = current_start_tag:end_()
               insert_col = insert_col - 1 -- Position before the >
 
