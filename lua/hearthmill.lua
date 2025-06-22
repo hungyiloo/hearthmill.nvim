@@ -921,7 +921,9 @@ function M.add(type)
               -- Build attribute text
               local attr_text = " " .. attr_name
               if attr_value and attr_value ~= "" then
-                attr_text = attr_text .. '="' .. attr_value .. '"'
+                -- We don't wrap the attr_value with double quotes; this is the user's responsibility.
+                -- Reason: JSX attribute values sometimes need enclosing with curly braces instead of quotes.
+                attr_text = attr_text .. '=' .. attr_value .. ''
               end
 
               insert_text_at_pos(insert_row, insert_col, { attr_text })
