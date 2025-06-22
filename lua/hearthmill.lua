@@ -876,9 +876,15 @@ function M.toggle_self_closing_element()
   end)
 end
 
+---@param type string
+function M.add(type)
+// ai: implement this. `type` can be "element" or "attribute". 
+// ai: it should prompt the user for the name of the element/attribute to create using vim.ui.input.
+// ai: for an attribute, also prompt for the value. value can be empty. attributes are added to the end of the opening tag of the current element.
+// for an element, create the opening and closing tags and place the cursor between them. ai!
+end
 
 -- TODO: new operation: selection expand and contract?
--- TODO: new operation: insert/add attribute
 -- TODO: new operation: insert html entity/character reference (see ./data/entities.json)
 -- TODO: write tests (try https://github.com/echasnovski/mini.test)
 
