@@ -927,9 +927,9 @@ function M.add(type)
               end
 
               insert_text_at_pos(insert_row, insert_col, { attr_text })
-              
-              -- Position cursor after the inserted attribute
-              set_cursor(insert_row, insert_col + string.len(attr_text))
+
+              -- Position cursor at the end of the inserted attribute
+              set_cursor(insert_row, insert_col + string.len(attr_text) - 1)
             end)
           end
         )
