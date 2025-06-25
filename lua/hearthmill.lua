@@ -1035,11 +1035,13 @@ function M.hoist(type)
       if end_tag then
         end_tag_text = node_to_string(end_tag)
         delete_node(end_tag)
+        goto_node_start(end_tag)
         collapse_blank_line()
       end
       if start_tag then
         start_tag_text = node_to_string(start_tag)
         delete_node(start_tag)
+        goto_node_start(start_tag)
         collapse_blank_line()
       end
 
