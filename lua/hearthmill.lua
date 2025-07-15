@@ -1103,6 +1103,7 @@ function M.hoist(type)
       -- Delete the attribute from current element
       delete_node(attribute)
       collapse_blank_spaces()
+      collapse_blank_line()
 
       treesitter_reparse()
 
