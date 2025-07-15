@@ -1121,11 +1121,31 @@ function M.hoist(type)
       local insert_row, insert_col = updated_parent_start_tag:end_()
       insert_col = insert_col - 1 -- Position before the >
 
-      local attr_text_to_insert = " " .. table.concat(attribute_text, "\n")
-      insert_text_at_pos(insert_row, insert_col, { attr_text_to_insert })
+      -- Handle multi-line attributes properly
+      local attr_text_to_insert = {}
+      if #attribute_text == 1 then
+        -- Single line attribute
+        attr_text_to_insert = { " " .. attribute_text[1] }
+      else
+        -- Multi-line attribute - preserve the line structure
+        attr_text_to_insert[1] = " " .. attribute_text[1]
+        for i = 2, #attribute_text do
+          attr_text_to_insert[i] = attribute_text[i]
+        end
+      end
+      
+      insert_text_at_pos(insert_row, insert_col, attr_text_to_insert)
 
       -- Position cursor at the moved attribute
-      set_cursor(insert_row, insert_col + string.len(attr_text_to_insert) - 1)
+      local total_length = 0
+      for _, line in ipairs(attr_text_to_insert) do
+        total_length = total_length + string.len(line)
+      end
+      if #attr_text_to_insert == 1 then
+        set_cursor(insert_row, insert_col + total_length - 1)
+      else
+        set_cursor(insert_row + #attr_text_to_insert - 1, string.len(attr_text_to_insert[#attr_text_to_insert]) - 1)
+      end
     end
   end)
 end
